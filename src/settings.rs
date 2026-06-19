@@ -1,7 +1,12 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    execute,
+    terminal::{self, ClearType},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -146,7 +151,7 @@ impl SettingsState {
                 self.config.trail_variability = (self.config.trail_variability + d * 0.05).clamp(0.0, 1.0);
             }
             SettingField::GlitchFrequency => {
-                self.config.glitch_frequency = (self.config.glitch_frequency + d * 0.05).clamp(0.0, 1.0);
+                self.config.glitch_frequency = (self.config.glitch_frequency + d * 0.01).clamp(0.0, 1.0);
             }
             SettingField::TrailColorR => {
                 let v = self.config.trail_color.r as i32 + delta * 5;
@@ -187,58 +192,127 @@ impl SettingsState {
     }
 }
 
-fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, color: Color) -> Line<'static> {
+fn dimmed(color: &crate::config::RgbColor, factor: f32) -> Color {
+    Color::Rgb(
+        (color.r as f32 * factor) as u8,
+        (color.g as f32 * factor) as u8,
+        (color.b as f32 * factor) as u8,
+    )
+}
+
+fn head_rgb(config: &Config) -> Color {
+    Color::Rgb(config.head_color.r, config.head_color.g, config.head_color.b)
+}
+
+fn trail_rgb(config: &Config) -> Color {
+    Color::Rgb(config.trail_color.r, config.trail_color.g, config.trail_color.b)
+}
+
+fn dim_trail(config: &Config) -> Color {
+    dimmed(&config.trail_color, 0.4)
+}
+
+fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, config: &Config) -> Line<'static> {
     let width = 20;
     let ratio = (value - min) / (max - min);
     let filled = (ratio * width as f32) as usize;
     let empty = width - filled;
 
-    let bar: String = "█".repeat(filled) + &"░".repeat(empty);
+    let filled_bar = "█".repeat(filled);
+    let empty_bar = "░".repeat(empty);
     let value_text = format!("{:.1}", value);
 
-    let style = if selected {
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    let (pointer, style) = if selected {
+        ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
     } else {
-        Style::default().fg(Color::DarkGray)
+        ("  ", Style::default().fg(dim_trail(config)))
     };
 
+    let dim = Style::default().fg(dim_trail(config));
+
     Line::from(vec![
-        Span::styled(format!("  {:18}", label), style),
-        Span::styled(format!("[{}] ", bar), style),
+        Span::styled(pointer, style),
+        Span::styled(format!("{:16}", label), style),
+        Span::styled("[", dim),
+        Span::styled(filled_bar, head_rgb(config)),
+        Span::styled(empty_bar, dim),
+        Span::styled("] ", dim),
         Span::styled(value_text, style),
     ])
 }
 
-fn render_toggle(label: &str, value: bool, selected: bool) -> Line<'static> {
-    let style = if selected {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+fn render_slider_pct(label: &str, value: f32, min: f32, max: f32, selected: bool, config: &Config) -> Line<'static> {
+    let width = 20;
+    let ratio = (value - min) / (max - min);
+    let filled = (ratio * width as f32) as usize;
+    let empty = width - filled;
+
+    let filled_bar = "█".repeat(filled);
+    let empty_bar = "░".repeat(empty);
+    let pct = (value * 100.0) as u32;
+    let value_text = format!("{}%", pct);
+
+    let (pointer, style) = if selected {
+        ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
     } else {
-        Style::default().fg(Color::DarkGray)
+        ("  ", Style::default().fg(dim_trail(config)))
     };
-    let text = if value { "ON " } else { "OFF" };
+
+    let dim = Style::default().fg(dim_trail(config));
+
     Line::from(vec![
-        Span::styled(format!("  {:18}", label), style),
-        Span::styled(format!("[{}]", text), style),
+        Span::styled(pointer, style),
+        Span::styled(format!("{:16}", label), style),
+        Span::styled("[", dim),
+        Span::styled(filled_bar, head_rgb(config)),
+        Span::styled(empty_bar, dim),
+        Span::styled("] ", dim),
+        Span::styled(value_text, style),
     ])
 }
 
-fn render_color_slider(label: &str, value: u8, selected: bool, color: Color) -> Line<'static> {
+fn render_toggle(label: &str, value: bool, selected: bool, config: &Config) -> Line<'static> {
+    let (pointer, style) = if selected {
+        ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
+    } else {
+        ("  ", Style::default().fg(dim_trail(config)))
+    };
+    let text = if value { "ON " } else { "OFF" };
+    let toggle_style = if selected && value {
+        Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(dim_trail(config))
+    };
+    Line::from(vec![
+        Span::styled(pointer, style),
+        Span::styled(format!("{:16}", label), style),
+        Span::styled(format!("[{}]", text), toggle_style),
+    ])
+}
+
+fn render_color_slider(label: &str, value: u8, selected: bool, channel_color: Color, config: &Config) -> Line<'static> {
     let width = 15;
     let ratio = value as f32 / 255.0;
     let filled = (ratio * width as f32) as usize;
     let empty = width - filled;
 
-    let bar: String = "█".repeat(filled) + &"░".repeat(empty);
+    let filled_bar = "█".repeat(filled);
+    let empty_bar = "░".repeat(empty);
 
-    let style = if selected {
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    let (pointer, style) = if selected {
+        ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
     } else {
-        Style::default().fg(Color::DarkGray)
+        ("  ", Style::default().fg(dim_trail(config)))
     };
+    let dim = Style::default().fg(dim_trail(config));
 
     Line::from(vec![
-        Span::styled(format!("    {:4}", label), style),
-        Span::styled(format!("[{}] ", bar), style),
+        Span::styled(pointer, style),
+        Span::styled(format!("  {:2}", label), Style::default().fg(channel_color).add_modifier(Modifier::BOLD)),
+        Span::styled("[", dim),
+        Span::styled(filled_bar, Style::default().fg(channel_color)),
+        Span::styled(empty_bar, dim),
+        Span::styled("] ", dim),
         Span::styled(format!("{:3}", value), style),
     ])
 }
@@ -247,7 +321,7 @@ fn render_preview(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame)
     let block = Block::default()
         .title(" preview ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(dim_trail(&state.config)));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -257,67 +331,83 @@ fn render_preview(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame)
         return;
     }
 
-    let mut screen = vec![vec![' '; w]; h];
-    let mut colors: Vec<Vec<Color>> = vec![vec![Color::Rgb(0, 0, 0); w]; h];
+    for y in 0..h {
+        let mut cells: Vec<(usize, char, Color)> = Vec::new();
 
-    for col in &state.preview_columns {
-        let head_y = col.y as i32;
-        let trail_len = col.length as usize;
+        for col in &state.preview_columns {
+            let head_y = col.y as i32;
+            let trail_len = col.length as usize;
+            let cell_x = col.x as usize;
 
-        for dist in 0..trail_len {
-            let draw_y = head_y - dist as i32;
-            if draw_y >= 0 && draw_y < h as i32 && (col.x as usize) < w {
-                let y = draw_y as usize;
-                let x = col.x as usize;
+            for dist in 0..trail_len {
+                let draw_y = head_y - dist as i32;
+                if draw_y as usize == y && cell_x < w {
+                    let ratio = 1.0 - (dist as f32 / trail_len as f32);
+                    let intensity = ratio * 0.8 + 0.1;
+                    let r = (state.config.trail_color.r as f32 * intensity) as u8;
+                    let g = (state.config.trail_color.g as f32 * intensity) as u8;
+                    let b = (state.config.trail_color.b as f32 * intensity) as u8;
 
-                let ratio = 1.0 - (dist as f32 / trail_len as f32);
-                let intensity = ratio * 0.8 + 0.1;
-                let r = (state.config.trail_color.r as f32 * intensity) as u8;
-                let g = (state.config.trail_color.g as f32 * intensity) as u8;
-                let b = (state.config.trail_color.b as f32 * intensity) as u8;
-
-                let ch = if dist == 0 {
-                    col.head_char
-                } else if dist < col.glyphs.len() {
-                    col.glyphs[dist]
-                } else {
-                    ' '
-                };
-
-                screen[y][x] = ch;
-                colors[y][x] = Color::Rgb(r, g, b);
+                    let ch = if dist == 0 {
+                        col.head_char
+                    } else if dist < col.glyphs.len() {
+                        col.glyphs[dist]
+                    } else {
+                        continue;
+                    };
+                    cells.push((cell_x, ch, Color::Rgb(r, g, b)));
+                }
             }
         }
+
+        cells.sort_by_key(|c| c.0);
+        let mut spans: Vec<Span> = Vec::new();
+        let mut last_x = 0;
+        for (x, ch, color) in cells {
+            if x > last_x {
+                let pad = x - last_x;
+                spans.push(Span::styled(" ".repeat(pad), Style::default().fg(dim_trail(&state.config))));
+            }
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+            last_x = x + 1;
+        }
+        if last_x < w {
+            spans.push(Span::styled(" ".repeat(w - last_x), Style::default()));
+        }
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(vec![line]);
+        let row_area = Rect {
+            x: inner.x,
+            y: inner.y + y as u16,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(paragraph, row_area);
     }
-
-    let lines: Vec<Line> = screen
-        .iter()
-        .zip(colors.iter())
-        .map(|(row, row_colors)| {
-            let spans: Vec<Span> = row
-                .iter()
-                .zip(row_colors.iter())
-                .map(|(&ch, &color)| {
-                    Span::styled(ch.to_string(), Style::default().fg(color))
-                })
-                .collect();
-            Line::from(spans)
-        })
-        .collect();
-
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, inner);
 }
 
 pub fn run_settings(config: Config) -> io::Result<Config> {
     let mut state = SettingsState::new(config);
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+
+    terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        cursor::Hide,
+        terminal::Clear(ClearType::All)
+    )?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
     let tick_rate = Duration::from_millis(50);
     let mut last_tick = Instant::now();
 
-    loop {
-        terminal.draw(|f| {
+    let result = (|| -> io::Result<Config> {
+        loop {
+            terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
@@ -332,7 +422,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
             let settings_block = Block::default()
                 .title(" rmatrix settings ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green));
+                .border_style(Style::default().fg(dim_trail(&state.config)));
             let inner = settings_block.inner(settings_area);
             f.render_widget(settings_block, settings_area);
 
@@ -340,13 +430,12 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
 
             lines.push(Line::from(""));
 
-            let speed_style = if state.selected == SettingField::Speed {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
             lines.push(Line::from(vec![
-                Span::styled("  Speed", speed_style),
+                Span::styled("  Speed", if state.selected == SettingField::Speed {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
             ]));
             lines.push(render_slider(
                 "",
@@ -354,19 +443,16 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 0.1,
                 5.0,
                 state.selected == SettingField::Speed,
-                Color::Green,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(
-                    "  Density",
-                    if state.selected == SettingField::Density {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
+                Span::styled("  Density", if state.selected == SettingField::Density {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
             ]));
             lines.push(render_slider(
                 "",
@@ -374,19 +460,16 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 0.0,
                 1.0,
                 state.selected == SettingField::Density,
-                Color::Green,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(
-                    "  FPS",
-                    if state.selected == SettingField::Fps {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
+                Span::styled("  FPS", if state.selected == SettingField::Fps {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
             ]));
             lines.push(render_slider(
                 "",
@@ -394,7 +477,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 1.0,
                 60.0,
                 state.selected == SettingField::Fps,
-                Color::Green,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
@@ -402,18 +485,16 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 "Bold",
                 state.config.bold,
                 state.selected == SettingField::Bold,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(
-                    "  Trail variability",
-                    if state.selected == SettingField::TrailVariability {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
+                Span::styled("  Trail variability", if state.selected == SettingField::TrailVariability {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
             ]));
             lines.push(render_slider(
                 "",
@@ -421,34 +502,31 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 0.0,
                 1.0,
                 state.selected == SettingField::TrailVariability,
-                Color::Green,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(
-                    "  Glitch frequency",
-                    if state.selected == SettingField::GlitchFrequency {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    },
-                ),
+                Span::styled("  Glitch frequency", if state.selected == SettingField::GlitchFrequency {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
             ]));
-            lines.push(render_slider(
+            lines.push(render_slider_pct(
                 "",
                 state.config.glitch_frequency,
                 0.0,
                 1.0,
                 state.selected == SettingField::GlitchFrequency,
-                Color::Green,
+                &state.config,
             ));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled(
                     "  Trail Color",
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD),
                 ),
             ]));
             lines.push(render_color_slider(
@@ -456,36 +534,35 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 state.config.trail_color.r,
                 state.selected == SettingField::TrailColorR,
                 Color::Red,
+                &state.config,
             ));
             lines.push(render_color_slider(
                 "G",
                 state.config.trail_color.g,
                 state.selected == SettingField::TrailColorG,
                 Color::Green,
+                &state.config,
             ));
             lines.push(render_color_slider(
                 "B",
                 state.config.trail_color.b,
                 state.selected == SettingField::TrailColorB,
                 Color::Blue,
+                &state.config,
             ));
 
-            let trail_preview_style = Style::default().fg(Color::Rgb(
-                state.config.trail_color.r,
-                state.config.trail_color.g,
-                state.config.trail_color.b,
-            ));
+            let trail_preview_style = Style::default().fg(trail_rgb(&state.config));
             lines.push(Line::from(vec![
                 Span::styled("    ", trail_preview_style),
                 Span::styled("████████", trail_preview_style),
-                Span::styled(" preview", Style::default().fg(Color::DarkGray)),
+                Span::styled(" preview", Style::default().fg(dim_trail(&state.config))),
             ]));
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled(
                     "  Head Color",
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD),
                 ),
             ]));
             lines.push(render_color_slider(
@@ -493,43 +570,42 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 state.config.head_color.r,
                 state.selected == SettingField::HeadColorR,
                 Color::Red,
+                &state.config,
             ));
             lines.push(render_color_slider(
                 "G",
                 state.config.head_color.g,
                 state.selected == SettingField::HeadColorG,
                 Color::Green,
+                &state.config,
             ));
             lines.push(render_color_slider(
                 "B",
                 state.config.head_color.b,
                 state.selected == SettingField::HeadColorB,
                 Color::Blue,
+                &state.config,
             ));
 
-            let head_preview_style = Style::default().fg(Color::Rgb(
-                state.config.head_color.r,
-                state.config.head_color.g,
-                state.config.head_color.b,
-            ));
+            let head_preview_style = Style::default().fg(head_rgb(&state.config));
             lines.push(Line::from(vec![
                 Span::styled("    ", head_preview_style),
                 Span::styled("████████", head_preview_style),
-                Span::styled(" preview", Style::default().fg(Color::DarkGray)),
+                Span::styled(" preview", Style::default().fg(dim_trail(&state.config))),
             ]));
 
             lines.push(Line::from(""));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled(
-                    "  \u{2191}/\u{2193}: select  \u{2190}/\u{2192}: adjust  Tab: next  Enter: toggle bold",
-                    Style::default().fg(Color::DarkGray),
+                    "  ↑/↓: select  ←/→: adjust  Tab: next  Enter: toggle bold",
+                    Style::default().fg(dim_trail(&state.config)),
                 ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled(
                     "  q/Esc: save & start rain",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(dim_trail(&state.config)),
                 ),
             ]));
 
@@ -576,5 +652,17 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 }
             }
         }
-    }
+        }
+    })();
+
+    // Restore terminal state
+    let mut stdout = io::stdout();
+    let _ = execute!(
+        stdout,
+        cursor::Show,
+        terminal::LeaveAlternateScreen
+    );
+    let _ = terminal::disable_raw_mode();
+
+    result
 }

@@ -70,10 +70,6 @@ impl Column {
     fn glitch(&mut self, frequency: f32) {
         let mut rng = rand::thread_rng();
         if rng.gen_range(0.0..1.0) < frequency {
-            let idx = rng.gen_range(0..self.glyphs.len());
-            self.glyphs[idx] = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
-        }
-        if rng.gen_range(0.0..1.0) < frequency {
             self.head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
         }
     }
@@ -110,7 +106,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
     )?;
 
     let (mut width, mut height) = terminal::size()?;
-    let mut num_columns = width as usize;
+    let mut num_columns = (width / 2) as usize;
     let density = config.density;
     let mut active_count = (num_columns as f32 * density) as usize;
 
@@ -149,7 +145,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
         if new_width != width || new_height != height {
             width = new_width;
             height = new_height;
-            num_columns = width as usize;
+            num_columns = (width / 2) as usize;
             active_count = (num_columns as f32 * density) as usize;
             columns.resize_with(num_columns, || {
                 let speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
@@ -174,38 +170,47 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
         }
 
         execute!(stdout, cursor::MoveTo(0, 0))?;
-        let mut screen = vec![vec![' '; width as usize]; height as usize];
-        let mut colors = vec![vec![Color::Black; width as usize]; height as usize];
 
-        for (x, col) in columns.iter().enumerate() {
-            if !col.active {
-                continue;
-            }
-            let head_y = col.y as i32;
-            let trail_len = col.length as usize;
+        for y in 0..height as usize {
+            execute!(stdout, cursor::MoveTo(0, y as u16))?;
+            let fill = " ".repeat(width as usize);
+            execute!(stdout, Print(&fill))?;
 
-            for dist in 0..trail_len {
-                let draw_y = head_y - dist as i32;
-                if draw_y >= 0 && draw_y < height as i32 {
-                    let y = draw_y as usize;
-                    let color = trail_color(config, dist, trail_len);
-                    let ch = if dist == 0 {
-                        col.head_char
-                    } else if dist < col.glyphs.len() {
-                        col.glyphs[dist]
-                    } else {
-                        ' '
-                    };
-                    screen[y][x] = ch;
-                    colors[y][x] = color;
+            let mut cells: Vec<(usize, char, Color)> = Vec::new();
+
+            for (x, col) in columns.iter().enumerate() {
+                if !col.active {
+                    continue;
+                }
+                let head_y = col.y as i32;
+                let trail_len = col.length as usize;
+                let cell_x = x * 2;
+
+                for dist in 0..trail_len {
+                    let draw_y = head_y - dist as i32;
+                    if draw_y as usize == y && cell_x < width as usize {
+                        let color = trail_color(config, dist, trail_len);
+                        let ch = if dist == 0 {
+                            col.head_char
+                        } else if dist < col.glyphs.len() {
+                            col.glyphs[dist]
+                        } else {
+                            continue;
+                        };
+                        cells.push((cell_x, ch, color));
+                    }
                 }
             }
-        }
 
-        for (y, row) in screen.iter().enumerate() {
-            execute!(stdout, cursor::MoveTo(0, y as u16))?;
-            for (x, &ch) in row.iter().enumerate() {
-                execute!(stdout, SetForegroundColor(colors[y][x]), Print(ch))?;
+            cells.sort_by_key(|c| c.0);
+            let mut cursor_x = 0u16;
+            for (x, ch, color) in cells {
+                if x as u16 > cursor_x {
+                    cursor_x = x as u16;
+                    execute!(stdout, cursor::MoveTo(cursor_x, y as u16))?;
+                }
+                execute!(stdout, SetForegroundColor(color), Print(ch))?;
+                cursor_x += 1;
             }
         }
         stdout.flush()?;
