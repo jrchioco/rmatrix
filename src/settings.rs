@@ -76,6 +76,7 @@ struct SettingsState {
     config: Config,
     selected: SettingField,
     preview_columns: Vec<RainColumn>,
+    preview_prev_occupied: Vec<bool>,
 }
 
 impl SettingsState {
@@ -93,6 +94,7 @@ impl SettingsState {
             config,
             selected: SettingField::Speed,
             preview_columns,
+            preview_prev_occupied: Vec::new(),
         }
     }
 
@@ -538,7 +540,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
         if let Some(pi) = preview_inner {
             let rows = compute_cells(&state.preview_columns, pi.height as usize, pi.width as usize, &state.config);
             let mut out = io::stdout();
-            render_cells(&mut out, &rows, pi.width, pi.x, pi.y)?;
+            render_cells(&mut out, &rows, pi.width, pi.x, pi.y, &mut state.preview_prev_occupied)?;
             out.flush()?;
         }
 

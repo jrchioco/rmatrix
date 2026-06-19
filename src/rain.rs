@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    execute,
+    execute, queue,
     style::{Print, SetForegroundColor},
     terminal::{self, ClearType},
 };
@@ -142,22 +142,42 @@ pub fn render_cells(
     area_width: u16,
     offset_x: u16,
     offset_y: u16,
+    prev_occupied: &mut Vec<bool>,
 ) -> io::Result<()> {
-    for (y, row) in rows.iter().enumerate() {
-        execute!(stdout, cursor::MoveTo(offset_x, offset_y + y as u16))?;
-        let fill = " ".repeat(area_width as usize);
-        execute!(stdout, Print(&fill))?;
+    if prev_occupied.len() < rows.len() {
+        prev_occupied.resize(rows.len(), false);
+    }
 
-        let mut cursor_x = 0u16;
-        for &(x, ref ch, color) in row {
-            let draw_x = offset_x + x as u16;
-            if draw_x > cursor_x {
-                cursor_x = draw_x;
-                execute!(stdout, cursor::MoveTo(cursor_x, offset_y + y as u16))?;
-            }
-            execute!(stdout, SetForegroundColor(color.into()), Print(ch))?;
-            cursor_x += 1;
+    for (y, row) in rows.iter().enumerate() {
+        let was_occupied = prev_occupied[y];
+        let is_occupied = !row.is_empty();
+
+        if !was_occupied && !is_occupied {
+            continue;
         }
+
+        queue!(stdout, cursor::MoveTo(offset_x, offset_y + y as u16))?;
+
+        if is_occupied {
+            let fill = " ".repeat(area_width as usize);
+            queue!(stdout, Print(&fill))?;
+
+            let mut cursor_x = 0u16;
+            for &(x, ref ch, color) in row {
+                let draw_x = offset_x + x as u16;
+                if draw_x > cursor_x {
+                    cursor_x = draw_x;
+                    queue!(stdout, cursor::MoveTo(cursor_x, offset_y + y as u16))?;
+                }
+                queue!(stdout, SetForegroundColor(color.into()), Print(ch))?;
+                cursor_x += 1;
+            }
+        } else {
+            let fill = " ".repeat(area_width as usize);
+            queue!(stdout, Print(&fill))?;
+        }
+
+        prev_occupied[y] = is_occupied;
     }
     Ok(())
 }
@@ -193,6 +213,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
         .collect();
 
     let frame_duration = Duration::from_millis(1000 / config.fps as u64);
+    let mut prev_occupied: Vec<bool> = Vec::new();
 
     loop {
         let frame_start = Instant::now();
@@ -226,6 +247,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
                 col.active = i < active_count;
             }
             execute!(stdout, terminal::Clear(ClearType::All))?;
+            prev_occupied.clear();
         }
 
         for col in columns.iter_mut() {
@@ -237,7 +259,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
         }
 
         let rows = compute_cells(&columns, height as usize, width as usize, config);
-        render_cells(&mut stdout, &rows, width, 0, 0)?;
+        render_cells(&mut stdout, &rows, width, 0, 0, &mut prev_occupied)?;
         stdout.flush()?;
 
         let elapsed = frame_start.elapsed();
