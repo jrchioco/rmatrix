@@ -18,13 +18,7 @@ use ratatui::{
 use rand::Rng;
 
 use crate::config::Config;
-
-const BAYBAYIN: [char; 23] = [
-    '\u{1700}', '\u{1701}', '\u{1702}', '\u{1703}', '\u{1704}', '\u{1705}',
-    '\u{1706}', '\u{1707}', '\u{1708}', '\u{1709}', '\u{170A}', '\u{170B}',
-    '\u{170C}', '\u{170D}', '\u{170E}', '\u{170F}', '\u{1710}', '\u{1711}',
-    '\u{1712}', '\u{1713}', '\u{1714}', '\u{1715}', '\u{1716}',
-];
+use crate::rain_render::{compute_cells, RainColumn};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SettingField {
@@ -78,53 +72,22 @@ impl SettingField {
     }
 }
 
-struct PreviewColumn {
-    x: u16,
-    y: f32,
-    speed: f32,
-    length: u16,
-    glyphs: Vec<char>,
-    head_char: char,
-}
-
-impl PreviewColumn {
-    fn new(config: &Config, x: u16) -> Self {
-        let mut rng = rand::thread_rng();
-        let length = (6.0 + rng.gen_range(0.0..1.0) * 8.0) as u16;
-        let speed = config.speed * (0.3 + rng.gen_range(0.0..1.0) * 0.7);
-        let y = rng.gen_range(0.0..1.0) * 20.0;
-        let glyphs: Vec<char> = (0..length)
-            .map(|_| BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())])
-            .collect();
-        let head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
-        Self { x, y, speed, length, glyphs, head_char }
-    }
-
-    fn advance(&mut self, height: u16) {
-        self.y += self.speed;
-        if self.y - self.length as f32 > height as f32 {
-            let mut rng = rand::thread_rng();
-            self.length = (6.0 + rng.gen_range(0.0..1.0) * 8.0) as u16;
-            self.y = -(rng.gen_range(0.0..1.0) * 3.0);
-            self.glyphs = (0..self.length)
-                .map(|_| BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())])
-                .collect();
-            self.head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
-        }
-    }
-}
-
 struct SettingsState {
     config: Config,
     selected: SettingField,
-    preview_columns: Vec<PreviewColumn>,
+    preview_columns: Vec<RainColumn>,
 }
 
 impl SettingsState {
     fn new(config: Config) -> Self {
-        let preview_columns: Vec<PreviewColumn> = (0..15)
-            .enumerate()
-            .map(|(i, _)| PreviewColumn::new(&config, i as u16 * 2))
+        let mut rng = rand::thread_rng();
+        let preview_columns: Vec<RainColumn> = (0..15)
+            .map(|_i| {
+                let speed = config.speed * (0.3 + rng.gen_range(0.0..1.0) * 0.7);
+                let length = (6.0 + rng.gen_range(0.0..1.0) * 44.0) as u16;
+                let y = rng.gen_range(0.0..1.0) * 20.0;
+                RainColumn::new(y, speed, length)
+            })
             .collect();
         Self {
             config,
@@ -187,7 +150,16 @@ impl SettingsState {
     fn update_preview(&mut self) {
         let height = 12;
         for col in self.preview_columns.iter_mut() {
-            col.advance(height);
+            col.y += col.speed;
+            if col.y - col.length as f32 > height as f32 {
+                let mut rng = rand::thread_rng();
+                col.length = (6.0 + rng.gen_range(0.0..1.0) * 8.0) as u16;
+                col.y = -(rng.gen_range(0.0..1.0) * 3.0);
+                col.glyphs = (0..col.length)
+                    .map(|_| crate::rain_render::BAYBAYIN[rng.gen_range(0..crate::rain_render::BAYBAYIN.len())])
+                    .collect();
+                col.head_char = crate::rain_render::BAYBAYIN[rng.gen_range(0..crate::rain_render::BAYBAYIN.len())];
+            }
         }
     }
 }
@@ -331,42 +303,15 @@ fn render_preview(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame)
         return;
     }
 
-    for y in 0..h {
-        let mut cells: Vec<(usize, char, Color)> = Vec::new();
+    let rows = compute_cells(&state.preview_columns, h, w, &state.config);
 
-        for col in &state.preview_columns {
-            let head_y = col.y as i32;
-            let trail_len = col.length as usize;
-            let cell_x = col.x as usize;
-
-            for dist in 0..trail_len {
-                let draw_y = head_y - dist as i32;
-                if draw_y as usize == y && cell_x < w {
-                    let ratio = 1.0 - (dist as f32 / trail_len as f32);
-                    let intensity = ratio * 0.8 + 0.1;
-                    let r = (state.config.trail_color.r as f32 * intensity) as u8;
-                    let g = (state.config.trail_color.g as f32 * intensity) as u8;
-                    let b = (state.config.trail_color.b as f32 * intensity) as u8;
-
-                    let ch = if dist == 0 {
-                        col.head_char
-                    } else if dist < col.glyphs.len() {
-                        col.glyphs[dist]
-                    } else {
-                        continue;
-                    };
-                    cells.push((cell_x, ch, Color::Rgb(r, g, b)));
-                }
-            }
-        }
-
-        cells.sort_by_key(|c| c.0);
+    for (y, row) in rows.iter().enumerate() {
         let mut spans: Vec<Span> = Vec::new();
         let mut last_x = 0;
-        for (x, ch, color) in cells {
+        for &(x, ref ch, color) in row {
             if x > last_x {
                 let pad = x - last_x;
-                spans.push(Span::styled(" ".repeat(pad), Style::default().fg(dim_trail(&state.config))));
+                spans.push(Span::styled(" ".repeat(pad), Style::default()));
             }
             spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
             last_x = x + 1;

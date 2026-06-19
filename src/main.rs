@@ -1,5 +1,6 @@
 mod config;
 mod rain;
+mod rain_render;
 mod settings;
 
 use clap::Parser;
