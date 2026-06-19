@@ -1,0 +1,39 @@
+mod config;
+mod rain;
+mod settings;
+
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(name = "rmatrix", about = "Matrix digital rain with Baybayin script")]
+struct Cli {
+    #[arg(long)]
+    settings: bool,
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let mut config = config::Config::load();
+
+    if cli.settings {
+        match settings::run_settings(config) {
+            Ok(new_config) => {
+                config = new_config;
+                if let Err(e) = config.save() {
+                    eprintln!("Failed to save settings: {e}");
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("Settings error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Err(e) = rain::run_rain(&config) {
+        eprintln!("Rain error: {e}");
+        std::process::exit(1);
+    }
+}
