@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -18,7 +18,7 @@ use ratatui::{
 use rand::Rng;
 
 use crate::config::Config;
-use crate::rain_render::{compute_cells, RainColumn};
+use crate::rain::{compute_cells, render_cells, RainColumn};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SettingField {
@@ -156,9 +156,9 @@ impl SettingsState {
                 col.length = (6.0 + rng.gen_range(0.0..1.0) * 8.0) as u16;
                 col.y = -(rng.gen_range(0.0..1.0) * 3.0);
                 col.glyphs = (0..col.length)
-                    .map(|_| crate::rain_render::BAYBAYIN[rng.gen_range(0..crate::rain_render::BAYBAYIN.len())])
+                    .map(|_| crate::rain::BAYBAYIN[rng.gen_range(0..crate::rain::BAYBAYIN.len())])
                     .collect();
-                col.head_char = crate::rain_render::BAYBAYIN[rng.gen_range(0..crate::rain_render::BAYBAYIN.len())];
+                col.head_char = crate::rain::BAYBAYIN[rng.gen_range(0..crate::rain::BAYBAYIN.len())];
             }
         }
     }
@@ -289,7 +289,7 @@ fn render_color_slider(label: &str, value: u8, selected: bool, channel_color: Co
     ])
 }
 
-fn render_preview(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame) {
+fn render_preview_block(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame) -> Option<Rect> {
     let block = Block::default()
         .title(" preview ")
         .borders(Borders::ALL)
@@ -300,36 +300,10 @@ fn render_preview(state: &SettingsState, area: Rect, frame: &mut ratatui::Frame)
     let w = inner.width as usize;
     let h = inner.height as usize;
     if w == 0 || h == 0 {
-        return;
+        return None;
     }
 
-    let rows = compute_cells(&state.preview_columns, h, w, &state.config);
-
-    for (y, row) in rows.iter().enumerate() {
-        let mut spans: Vec<Span> = Vec::new();
-        let mut last_x = 0;
-        for &(x, ref ch, color) in row {
-            if x > last_x {
-                let pad = x - last_x;
-                spans.push(Span::styled(" ".repeat(pad), Style::default()));
-            }
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
-            last_x = x + 1;
-        }
-        if last_x < w {
-            spans.push(Span::styled(" ".repeat(w - last_x), Style::default()));
-        }
-
-        let line = Line::from(spans);
-        let paragraph = Paragraph::new(vec![line]);
-        let row_area = Rect {
-            x: inner.x,
-            y: inner.y + y as u16,
-            width: inner.width,
-            height: 1,
-        };
-        frame.render_widget(paragraph, row_area);
-    }
+    Some(inner)
 }
 
 pub fn run_settings(config: Config) -> io::Result<Config> {
@@ -352,6 +326,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
 
     let result = (|| -> io::Result<Config> {
         loop {
+            let mut preview_inner = None;
             terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -557,8 +532,15 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
             let paragraph = Paragraph::new(lines);
             f.render_widget(paragraph, inner);
 
-            render_preview(&state, preview_area, f);
+            preview_inner = render_preview_block(&state, preview_area, f);
         })?;
+
+        if let Some(pi) = preview_inner {
+            let rows = compute_cells(&state.preview_columns, pi.height as usize, pi.width as usize, &state.config);
+            let mut out = io::stdout();
+            render_cells(&mut out, &rows, pi.width, pi.x, pi.y)?;
+            out.flush()?;
+        }
 
         let elapsed = last_tick.elapsed();
         if elapsed >= tick_rate {
