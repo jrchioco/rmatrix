@@ -331,6 +331,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
     let result = (|| -> io::Result<Config> {
         loop {
             let mut preview_inner = None;
+            terminal.clear()?;
             terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
