@@ -81,19 +81,10 @@ struct SettingsState {
 
 impl SettingsState {
     fn new(config: Config) -> Self {
-        let mut rng = rand::thread_rng();
-        let preview_columns: Vec<RainColumn> = (0..15)
-            .map(|_i| {
-                let speed = config.speed * (0.3 + rng.gen_range(0.0..1.0) * 0.7);
-                let length = (6.0 + rng.gen_range(0.0..1.0) * 44.0) as u16;
-                let y = rng.gen_range(0.0..1.0) * 20.0;
-                RainColumn::new(y, speed, length)
-            })
-            .collect();
         Self {
             config,
             selected: SettingField::Speed,
-            preview_columns,
+            preview_columns: Vec::new(),
             preview_prev_occupied: Vec::new(),
         }
     }
@@ -103,6 +94,10 @@ impl SettingsState {
         match self.selected {
             SettingField::Speed => {
                 self.config.speed = (self.config.speed + d * 0.1).clamp(0.1, 5.0);
+                let mut rng = rand::thread_rng();
+                for col in self.preview_columns.iter_mut() {
+                    col.speed = self.config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
+                }
             }
             SettingField::Density => {
                 self.config.density = (self.config.density + d * 0.05).clamp(0.0, 1.0);
@@ -149,19 +144,26 @@ impl SettingsState {
         self.config.bold = !self.config.bold;
     }
 
-    fn update_preview(&mut self) {
+    fn update_preview(&mut self, preview_width: u16) {
         let height = 12;
-        for col in self.preview_columns.iter_mut() {
-            col.y += col.speed;
-            if col.y - col.length as f32 > height as f32 {
+        let num_columns = preview_width as usize / 2;
+
+        if self.preview_columns.len() != num_columns {
+            self.preview_columns.resize_with(num_columns, || {
                 let mut rng = rand::thread_rng();
-                col.length = (6.0 + rng.gen_range(0.0..1.0) * 8.0) as u16;
-                col.y = -(rng.gen_range(0.0..1.0) * 3.0);
-                col.glyphs = (0..col.length)
-                    .map(|_| crate::rain::BAYBAYIN[rng.gen_range(0..crate::rain::BAYBAYIN.len())])
-                    .collect();
-                col.head_char = crate::rain::BAYBAYIN[rng.gen_range(0..crate::rain::BAYBAYIN.len())];
-            }
+                let speed = self.config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
+                let base_length = 8.0_f32;
+                let variation = self.config.trail_variability * 42.0;
+                let length = (base_length + rng.gen_range(0.0..1.0) * variation) as u16;
+                let y = rng.gen_range(0.0..1.0) * height as f32;
+                RainColumn::new(y, speed, length.max(3))
+            });
+            self.preview_prev_occupied.clear();
+        }
+
+        for col in self.preview_columns.iter_mut() {
+            col.advance(height as u16, &self.config);
+            col.glitch(self.config.glitch_frequency);
         }
     }
 }
@@ -537,7 +539,9 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
             preview_inner = render_preview_block(&state, preview_area, f);
         })?;
 
+        let mut preview_width: u16 = 0;
         if let Some(pi) = preview_inner {
+            preview_width = pi.width;
             let rows = compute_cells(&state.preview_columns, pi.height as usize, pi.width as usize, &state.config);
             let mut out = io::stdout();
             render_cells(&mut out, &rows, pi.width, pi.x, pi.y, &mut state.preview_prev_occupied)?;
@@ -546,7 +550,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
 
         let elapsed = last_tick.elapsed();
         if elapsed >= tick_rate {
-            state.update_preview();
+            state.update_preview(preview_width);
             last_tick = Instant::now();
         }
 
