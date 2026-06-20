@@ -22,6 +22,7 @@ pub const BAYBAYIN: [char; 23] = [
 
 pub struct RainColumn {
     pub y: f32,
+    pub render_y: i32,
     pub speed: f32,
     pub length: u16,
     pub active: bool,
@@ -38,6 +39,7 @@ impl RainColumn {
         let head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
         Self {
             y,
+            render_y: y as i32,
             speed,
             length,
             active: true,
@@ -54,6 +56,7 @@ impl RainColumn {
         self.length = self.length.max(3);
         self.speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
         self.y = -(rng.gen_range(0.0..1.0) * 5.0);
+        self.render_y = self.y as i32;
         self.glyphs = (0..self.length)
             .map(|_| BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())])
             .collect();
@@ -62,7 +65,13 @@ impl RainColumn {
     }
 
     pub fn advance(&mut self, height: u16, config: &Config) {
+        let prev_y = self.y;
         self.y += self.speed;
+        let prev_render = prev_y as i32;
+        let new_render = self.y as i32;
+        if prev_render != new_render {
+            self.render_y = new_render;
+        }
         if self.y - self.length as f32 > height as f32 {
             self.reset(config, height as f32);
         }
@@ -108,7 +117,7 @@ pub fn compute_cells(
         if !col.active {
             continue;
         }
-        let head_y = col.y as i32;
+        let head_y = col.render_y;
         let trail_len = col.length as usize;
         let cell_x = x * 2;
 
@@ -162,15 +171,14 @@ pub fn render_cells(
             let fill = " ".repeat(area_width as usize);
             queue!(stdout, Print(&fill))?;
 
-            let mut cursor_x = 0u16;
+            let mut cursor_x: Option<u16> = None;
             for &(x, ref ch, color) in row {
                 let draw_x = offset_x + x as u16;
-                if draw_x > cursor_x {
-                    cursor_x = draw_x;
-                    queue!(stdout, cursor::MoveTo(cursor_x, offset_y + y as u16))?;
+                if cursor_x != Some(draw_x) {
+                    queue!(stdout, cursor::MoveTo(draw_x, offset_y + y as u16))?;
                 }
                 queue!(stdout, SetForegroundColor(color.into()), Print(ch))?;
-                cursor_x += 1;
+                cursor_x = Some(draw_x + 1);
             }
         } else {
             let fill = " ".repeat(area_width as usize);
