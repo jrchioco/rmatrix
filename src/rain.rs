@@ -13,11 +13,11 @@ use ratatui::style::Color;
 
 use crate::config::Config;
 
-pub const BAYBAYIN: [char; 23] = [
+pub const BAYBAYIN: [char; 21] = [
     '\u{1700}', '\u{1701}', '\u{1702}', '\u{1703}', '\u{1704}', '\u{1705}',
     '\u{1706}', '\u{1707}', '\u{1708}', '\u{1709}', '\u{170A}', '\u{170B}',
     '\u{170C}', '\u{170D}', '\u{170E}', '\u{170F}', '\u{1710}', '\u{1711}',
-    '\u{1712}', '\u{1713}', '\u{1714}', '\u{1715}', '\u{1716}',
+    '\u{1712}', '\u{1713}', '\u{1714}',
 ];
 
 pub struct RainColumn {
