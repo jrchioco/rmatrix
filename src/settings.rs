@@ -325,7 +325,6 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let tick_rate = Duration::from_millis(50);
     let mut last_tick = Instant::now();
 
     let result = (|| -> io::Result<Config> {
@@ -550,6 +549,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
         }
 
         let elapsed = last_tick.elapsed();
+        let tick_rate = Duration::from_millis(1000 / state.config.fps as u64);
         if elapsed >= tick_rate {
             state.update_preview(preview_width);
             last_tick = Instant::now();
