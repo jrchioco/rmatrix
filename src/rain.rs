@@ -71,10 +71,15 @@ impl RainColumn {
         }
     }
 
-    pub fn glitch(&mut self, frequency: f32) {
+    pub fn glitch(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
-        if rng.gen_range(0.0..1.0) < frequency {
+        if rng.gen_range(0.0..1.0) < config.glitch_frequency {
             self.head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
+        }
+        for glyph in self.glyphs.iter_mut() {
+            if rng.gen_range(0.0..1.0) < config.trail_glitch_frequency {
+                *glyph = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
+            }
         }
     }
 }
@@ -243,7 +248,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
                 continue;
             }
             col.advance(height, config);
-            col.glitch(config.glitch_frequency);
+            col.glitch(config);
         }
 
         let rows = compute_cells(&columns, height as usize, width as usize, config);

@@ -28,6 +28,7 @@ enum SettingField {
     Bold,
     TrailVariability,
     GlitchFrequency,
+    TrailGlitchFrequency,
     TrailColorR,
     TrailColorG,
     TrailColorB,
@@ -43,6 +44,7 @@ const ALL_FIELDS: &[SettingField] = &[
     SettingField::Bold,
     SettingField::TrailVariability,
     SettingField::GlitchFrequency,
+    SettingField::TrailGlitchFrequency,
     SettingField::TrailColorR,
     SettingField::TrailColorG,
     SettingField::TrailColorB,
@@ -104,6 +106,9 @@ impl SettingsState {
             SettingField::GlitchFrequency => {
                 self.config.glitch_frequency = (self.config.glitch_frequency + d * 0.01).clamp(0.0, 1.0);
             }
+            SettingField::TrailGlitchFrequency => {
+                self.config.trail_glitch_frequency = (self.config.trail_glitch_frequency + d * 0.01).clamp(0.0, 1.0);
+            }
             SettingField::TrailColorR => {
                 let v = self.config.trail_color.r as i32 + delta * 5;
                 self.config.trail_color.r = v.clamp(0, 255) as u8;
@@ -148,7 +153,7 @@ impl SettingsState {
 
         for col in self.preview_columns.iter_mut() {
             col.advance(height as u16, &self.config);
-            col.glitch(self.config.glitch_frequency);
+            col.glitch(&self.config);
         }
     }
 }
@@ -406,6 +411,23 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 0.0,
                 1.0,
                 state.selected == SettingField::GlitchFrequency,
+                &state.config,
+            ));
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  Trail glitch freq", if state.selected == SettingField::TrailGlitchFrequency {
+                    Style::default().fg(head_rgb(&state.config)).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(dim_trail(&state.config))
+                }),
+            ]));
+            lines.push(render_slider_pct(
+                "",
+                state.config.trail_glitch_frequency,
+                0.0,
+                1.0,
+                state.selected == SettingField::TrailGlitchFrequency,
                 &state.config,
             ));
 

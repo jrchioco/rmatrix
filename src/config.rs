@@ -8,6 +8,7 @@ const DEFAULT_FPS: u32 = 30;
 const DEFAULT_BOLD: bool = false;
 const DEFAULT_TRAIL_VARIABILITY: f32 = 0.5;
 const DEFAULT_GLITCH_FREQUENCY: f32 = 0.1;
+const DEFAULT_TRAIL_GLITCH_FREQUENCY: f32 = 0.05;
 const DEFAULT_TRAIL_R: u8 = 0;
 const DEFAULT_TRAIL_G: u8 = 255;
 const DEFAULT_TRAIL_B: u8 = 65;
@@ -30,6 +31,7 @@ pub struct Config {
     pub bold: bool,
     pub trail_variability: f32,
     pub glitch_frequency: f32,
+    pub trail_glitch_frequency: f32,
     pub trail_color: RgbColor,
     pub head_color: RgbColor,
 }
@@ -43,6 +45,7 @@ impl Default for Config {
             bold: DEFAULT_BOLD,
             trail_variability: DEFAULT_TRAIL_VARIABILITY,
             glitch_frequency: DEFAULT_GLITCH_FREQUENCY,
+            trail_glitch_frequency: DEFAULT_TRAIL_GLITCH_FREQUENCY,
             trail_color: RgbColor {
                 r: DEFAULT_TRAIL_R,
                 g: DEFAULT_TRAIL_G,
@@ -93,6 +96,7 @@ impl Config {
         self.fps = self.fps.clamp(1, 60);
         self.trail_variability = self.trail_variability.clamp(0.0, 1.0);
         self.glitch_frequency = self.glitch_frequency.clamp(0.0, 1.0);
+        self.trail_glitch_frequency = self.trail_glitch_frequency.clamp(0.0, 1.0);
         self
     }
 }
