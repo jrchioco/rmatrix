@@ -2,21 +2,10 @@ mod config;
 mod rain;
 mod settings;
 
-use clap::Parser;
-
-#[derive(Parser)]
-#[command(name = "rmatrix", about = "Matrix digital rain with Baybayin script")]
-struct Cli {
-    #[arg(long)]
-    settings: bool,
-}
-
 fn main() {
-    let cli = Cli::parse();
-
     let mut config = config::Config::load();
 
-    if cli.settings {
+    if std::env::args().any(|a| a == "--settings") {
         match settings::run_settings(config) {
             Ok(new_config) => {
                 config = new_config;

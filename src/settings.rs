@@ -36,39 +36,30 @@ enum SettingField {
     HeadColorB,
 }
 
+const ALL_FIELDS: &[SettingField] = &[
+    SettingField::Speed,
+    SettingField::Density,
+    SettingField::Fps,
+    SettingField::Bold,
+    SettingField::TrailVariability,
+    SettingField::GlitchFrequency,
+    SettingField::TrailColorR,
+    SettingField::TrailColorG,
+    SettingField::TrailColorB,
+    SettingField::HeadColorR,
+    SettingField::HeadColorG,
+    SettingField::HeadColorB,
+];
+
 impl SettingField {
     fn next(self) -> Self {
-        match self {
-            Self::Speed => Self::Density,
-            Self::Density => Self::Fps,
-            Self::Fps => Self::Bold,
-            Self::Bold => Self::TrailVariability,
-            Self::TrailVariability => Self::GlitchFrequency,
-            Self::GlitchFrequency => Self::TrailColorR,
-            Self::TrailColorR => Self::TrailColorG,
-            Self::TrailColorG => Self::TrailColorB,
-            Self::TrailColorB => Self::HeadColorR,
-            Self::HeadColorR => Self::HeadColorG,
-            Self::HeadColorG => Self::HeadColorB,
-            Self::HeadColorB => Self::Speed,
-        }
+        let i = ALL_FIELDS.iter().position(|&f| f == self).unwrap_or(0);
+        ALL_FIELDS[(i + 1) % ALL_FIELDS.len()]
     }
 
     fn prev(self) -> Self {
-        match self {
-            Self::Speed => Self::HeadColorB,
-            Self::Density => Self::Speed,
-            Self::Fps => Self::Density,
-            Self::Bold => Self::Fps,
-            Self::TrailVariability => Self::Bold,
-            Self::GlitchFrequency => Self::TrailVariability,
-            Self::TrailColorR => Self::GlitchFrequency,
-            Self::TrailColorG => Self::TrailColorR,
-            Self::TrailColorB => Self::TrailColorG,
-            Self::HeadColorR => Self::TrailColorB,
-            Self::HeadColorG => Self::HeadColorR,
-            Self::HeadColorB => Self::HeadColorG,
-        }
+        let i = ALL_FIELDS.iter().position(|&f| f == self).unwrap_or(0);
+        ALL_FIELDS[(i + ALL_FIELDS.len() - 1) % ALL_FIELDS.len()]
     }
 }
 
@@ -150,13 +141,7 @@ impl SettingsState {
 
         if self.preview_columns.len() != num_columns {
             self.preview_columns.resize_with(num_columns, || {
-                let mut rng = rand::thread_rng();
-                let speed = self.config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
-                let base_length = 8.0_f32;
-                let variation = self.config.trail_variability * 42.0;
-                let length = (base_length + rng.gen_range(0.0..1.0) * variation) as u16;
-                let y = rng.gen_range(0.0..1.0) * height as f32;
-                RainColumn::new(y, speed, length.max(3))
+                RainColumn::random(&self.config, height as f32)
             });
             self.preview_prev_occupied.clear();
         }
@@ -188,7 +173,7 @@ fn dim_trail(config: &Config) -> Color {
     dimmed(&config.trail_color, 0.4)
 }
 
-fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, config: &Config) -> Line<'static> {
+fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, config: &Config, fmt: fn(f32) -> String) -> Line<'static> {
     let width = 20;
     let ratio = (value - min) / (max - min);
     let filled = (ratio * width as f32) as usize;
@@ -196,7 +181,7 @@ fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, co
 
     let filled_bar = "█".repeat(filled);
     let empty_bar = "░".repeat(empty);
-    let value_text = format!("{:.1}", value);
+    let value_text = fmt(value);
 
     let (pointer, style) = if selected {
         ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
@@ -218,33 +203,7 @@ fn render_slider(label: &str, value: f32, min: f32, max: f32, selected: bool, co
 }
 
 fn render_slider_pct(label: &str, value: f32, min: f32, max: f32, selected: bool, config: &Config) -> Line<'static> {
-    let width = 20;
-    let ratio = (value - min) / (max - min);
-    let filled = (ratio * width as f32) as usize;
-    let empty = width - filled;
-
-    let filled_bar = "█".repeat(filled);
-    let empty_bar = "░".repeat(empty);
-    let pct = (value * 100.0) as u32;
-    let value_text = format!("{}%", pct);
-
-    let (pointer, style) = if selected {
-        ("▸ ", Style::default().fg(head_rgb(config)).add_modifier(Modifier::BOLD))
-    } else {
-        ("  ", Style::default().fg(dim_trail(config)))
-    };
-
-    let dim = Style::default().fg(dim_trail(config));
-
-    Line::from(vec![
-        Span::styled(pointer, style),
-        Span::styled(format!("{:16}", label), style),
-        Span::styled("[", dim),
-        Span::styled(filled_bar, head_rgb(config)),
-        Span::styled(empty_bar, dim),
-        Span::styled("] ", dim),
-        Span::styled(value_text, style),
-    ])
+    render_slider(label, value, min, max, selected, config, |v| format!("{}%", (v * 100.0) as u32))
 }
 
 fn render_toggle(label: &str, value: bool, selected: bool, config: &Config) -> Line<'static> {
@@ -368,6 +327,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 5.0,
                 state.selected == SettingField::Speed,
                 &state.config,
+                |v| format!("{:.1}", v),
             ));
 
             lines.push(Line::from(""));
@@ -385,6 +345,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 1.0,
                 state.selected == SettingField::Density,
                 &state.config,
+                |v| format!("{:.1}", v),
             ));
 
             lines.push(Line::from(""));
@@ -402,6 +363,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 60.0,
                 state.selected == SettingField::Fps,
                 &state.config,
+                |v| format!("{:.1}", v),
             ));
 
             lines.push(Line::from(""));
@@ -427,6 +389,7 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
                 1.0,
                 state.selected == SettingField::TrailVariability,
                 &state.config,
+                |v| format!("{:.1}", v),
             ));
 
             lines.push(Line::from(""));
@@ -555,35 +518,35 @@ pub fn run_settings(config: Config) -> io::Result<Config> {
             last_tick = Instant::now();
         }
 
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
-                match code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        return Ok(state.config);
-                    }
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(state.config);
-                    }
-                    KeyCode::Up => {
-                        state.selected = state.selected.prev();
-                    }
-                    KeyCode::Down => {
-                        state.selected = state.selected.next();
-                    }
-                    KeyCode::Left => {
-                        state.adjust(-1);
-                    }
-                    KeyCode::Right => {
-                        state.adjust(1);
-                    }
-                    KeyCode::Tab => {
-                        state.selected = state.selected.next();
-                    }
-                    KeyCode::Enter => {
-                        state.toggle_bold();
-                    }
-                    _ => {}
+        if event::poll(Duration::from_millis(16))?
+            && let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()?
+        {
+            match code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    return Ok(state.config);
                 }
+                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(state.config);
+                }
+                KeyCode::Up => {
+                    state.selected = state.selected.prev();
+                }
+                KeyCode::Down => {
+                    state.selected = state.selected.next();
+                }
+                KeyCode::Left => {
+                    state.adjust(-1);
+                }
+                KeyCode::Right => {
+                    state.adjust(1);
+                }
+                KeyCode::Tab => {
+                    state.selected = state.selected.next();
+                }
+                KeyCode::Enter => {
+                    state.toggle_bold();
+                }
+                _ => {}
             }
         }
         }

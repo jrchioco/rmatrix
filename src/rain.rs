@@ -30,8 +30,13 @@ pub struct RainColumn {
 }
 
 impl RainColumn {
-    pub fn new(y: f32, speed: f32, length: u16) -> Self {
+    pub fn random(config: &Config, height: f32) -> Self {
         let mut rng = rand::thread_rng();
+        let speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
+        let base_length = 8.0_f32;
+        let variation = config.trail_variability * 42.0;
+        let length = (base_length + rng.gen_range(0.0..1.0) * variation).max(3.0) as u16;
+        let y = rng.gen_range(0.0..1.0) * height;
         let glyphs: Vec<char> = (0..length)
             .map(|_| BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())])
             .collect();
@@ -47,20 +52,10 @@ impl RainColumn {
         }
     }
 
-    pub fn reset(&mut self, config: &Config, _height: f32) {
-        let mut rng = rand::thread_rng();
-        let base_length = 8.0_f32;
-        let variation = config.trail_variability * 42.0;
-        self.length = (base_length + rng.gen_range(0.0..1.0) * variation) as u16;
-        self.length = self.length.max(3);
-        self.speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
-        self.y = -(rng.gen_range(0.0..1.0) * 5.0);
+    pub fn reset(&mut self, config: &Config, height: f32) {
+        *self = Self::random(config, height);
+        self.y = -(rand::thread_rng().gen_range(0.0..1.0) * 5.0);
         self.render_y = self.y as i32;
-        self.glyphs = (0..self.length)
-            .map(|_| BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())])
-            .collect();
-        self.head_char = BAYBAYIN[rng.gen_range(0..BAYBAYIN.len())];
-        self.active = true;
     }
 
     pub fn advance(&mut self, height: u16, config: &Config) {
@@ -204,17 +199,10 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
     let density = config.density;
     let mut active_count = (num_columns as f32 * density) as usize;
 
-    let mut rng = rand::thread_rng();
     let mut columns: Vec<RainColumn> = (0..num_columns)
         .map(|i| {
-            let is_active = i < active_count;
-            let speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
-            let base_length = 8.0_f32;
-            let variation = config.trail_variability * 42.0;
-            let length = (base_length + rng.gen_range(0.0..1.0) * variation) as u16;
-            let y = rng.gen_range(0.0..1.0) * height as f32;
-            let mut col = RainColumn::new(y, speed, length.max(3));
-            col.active = is_active;
+            let mut col = RainColumn::random(config, height as f32);
+            col.active = i < active_count;
             col
         })
         .collect();
@@ -225,14 +213,14 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
     loop {
         let frame_start = Instant::now();
 
-        if event::poll(Duration::from_millis(0))? {
-            if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
-                match code {
-                    KeyCode::Char('q') | KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        break;
-                    }
-                    _ => {}
+        if event::poll(Duration::from_millis(0))?
+            && let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()?
+        {
+            match code {
+                KeyCode::Char('q') | KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    break;
                 }
+                _ => {}
             }
         }
 
@@ -242,14 +230,7 @@ pub fn run_rain(config: &Config) -> io::Result<()> {
             height = new_height;
             num_columns = (width / 2) as usize;
             active_count = (num_columns as f32 * density) as usize;
-            columns.resize_with(num_columns, || {
-                let speed = config.speed * (0.5 + rng.gen_range(0.0..1.0) * 1.0);
-                let base_length = 8.0_f32;
-                let variation = config.trail_variability * 42.0;
-                let length = (base_length + rng.gen_range(0.0..1.0) * variation) as u16;
-                let y = rng.gen_range(0.0..1.0) * height as f32;
-                RainColumn::new(y, speed, length.max(3))
-            });
+            columns.resize_with(num_columns, || RainColumn::random(config, height as f32));
             for (i, col) in columns.iter_mut().enumerate() {
                 col.active = i < active_count;
             }
